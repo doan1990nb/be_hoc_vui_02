@@ -1,0 +1,102 @@
+name: Build APK Android
+
+# ══════════════════════════════════════════════════════════════
+#  GitHub Actions: Tự động build APK mỗi khi push code
+#  Hoặc kích hoạt thủ công từ tab Actions
+# ══════════════════════════════════════════════════════════════
+
+on:
+  # Tự động chạy khi push vào branch main
+  push:
+    branches: [ main, master ]
+
+  # Cho phép chạy thủ công từ tab Actions trên GitHub
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # 1. Lấy code về
+      - name: 📥 Checkout source
+        uses: actions/checkout@v4
+
+      # 2. Cài Node.js 20
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 3. Cài JDK 17 (cần để build Android)
+      - name: ☕ Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 4. Cài Android SDK (tự động accept license + cài SDK 34)
+      - name: 📱 Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      # 5. Cài thư viện npm
+      - name: 📦 Install dependencies
+        run: npm install
+
+      # 6. Build web bundle (Vite)
+      - name: 🔨 Build web app
+        run: npm run build
+
+      # 7. Khởi tạo Android project bằng Capacitor
+      - name: 📲 Add Android platform
+        run: npx cap add android || npx cap sync android
+
+      # 8. Sync code vào Android project
+      - name: 🔄 Sync Capacitor
+        run: npx cap sync android
+
+      # 9. Cấp quyền execute cho gradlew
+      - name: 🔓 Grant gradlew permission
+        run: chmod +x android/gradlew
+
+      # 10. Build APK debug (không cần ký, dùng được ngay)
+      - name: 🚀 Build APK
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon
+
+      # 11. Đổi tên cho dễ nhận biết
+      - name: 📝 Rename APK
+        run: |
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/BeHocVui.apk
+
+      # 12. Upload APK làm artifact (tải về được)
+      - name: 📤 Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeHocVui-APK
+          path: artifacts/BeHocVui.apk
+          retention-days: 30
+
+      # 13. (Tùy chọn) Tạo Release với APK đính kèm — chỉ khi tag
+      - name: 📦 Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/BeHocVui.apk
+          name: Bé Học Vui ${{ github.ref_name }}
+          body: |
+            ## 🦉 Bé Học Vui ${{ github.ref_name }}
+
+            Tải file APK đính kèm và cài lên điện thoại Android.
+
+            **Hướng dẫn:**
+            1. Tải `BeHocVui.apk`
+            2. Mở trên điện thoại
+            3. Cho phép "Cài từ nguồn không xác định"
+            4. Cài đặt và mở app
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
