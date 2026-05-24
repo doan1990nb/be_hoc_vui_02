@@ -40,20 +40,35 @@ const playRealVoice = (id) => {
 
 // ── TTS (fallback) ──
 let _voices = [];
+let _hasViVoice = false;
 if (typeof window !== "undefined") {
-  const load = () => { _voices = window.speechSynthesis?.getVoices() || []; };
+  const load = () => {
+    _voices = window.speechSynthesis?.getVoices() || [];
+    _hasViVoice = _voices.some(v => v.lang?.startsWith("vi"));
+  };
   load();
   window.speechSynthesis?.addEventListener("voiceschanged", load);
 }
+const hasVietnameseVoice = () => _hasViVoice;
+
 const speak = (text, lang="vi-VN", rate=0.78, pitch=1.18, lessonId=null) => {
   if (USE_REAL_VOICE && lessonId && playRealVoice(lessonId)) return;
   if (!window.speechSynthesis || !text) return;
   window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang=lang; u.rate=rate; u.pitch=pitch; u.volume=1;
-  const v = _voices.find(x=>x.lang.startsWith(lang.split("-")[0])&&/google|premium/i.test(x.name))
-          || _voices.find(x=>x.lang.startsWith(lang.split("-")[0]));
-  if (v) u.voice=v;
+
+  // Ưu tiên giọng tiếng Việt chất lượng cao
+  const voicePicks = [
+    v => v.lang === lang && /google|premium|enhanced|neural|wavenet/i.test(v.name),
+    v => v.lang === lang,
+    v => v.lang.startsWith(lang.split("-")[0]) && /google|premium|enhanced|neural|wavenet/i.test(v.name),
+    v => v.lang.startsWith(lang.split("-")[0]),
+  ];
+  for (const pick of voicePicks) {
+    const found = _voices.find(pick);
+    if (found) { u.voice = found; break; }
+  }
   window.speechSynthesis.speak(u);
 };
 
@@ -474,10 +489,10 @@ const TimeTracker = {
 //  CSS
 // ══════════════════════════════════════════════════════════════
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@700;900&display=swap');
+  /* Dùng font hệ thống — không cần tải online, hiển thị đẹp trên mọi máy Android */
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:'Nunito',sans-serif;background:#f0f4f8;}
-  .F{font-family:'Fredoka One',cursive;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:#f0f4f8;}
+  .F{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-weight:900;letter-spacing:0.3px;}
   .B{cursor:pointer;border:none;outline:none;-webkit-tap-highlight-color:transparent;user-select:none;transition:transform .12s cubic-bezier(.34,1.56,.64,1),opacity .1s;}
   .B:active{transform:scale(0.85)!important;opacity:0.85;}
 
@@ -619,6 +634,40 @@ function AgeSelect({ onPick }) {
   );
 }
 
+// ── Cảnh báo nếu thiếu giọng tiếng Việt ──
+function VoiceCheck() {
+  const [show, setShow] = useState(false);
+  const [dismissed, setDismissed] = useState(() => S.get("voiceWarnDismissed", false));
+
+  useEffect(() => {
+    // Check sau 2s để Android có thời gian load voices
+    const t = setTimeout(() => {
+      if (!hasVietnameseVoice() && !dismissed) setShow(true);
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [dismissed]);
+
+  if (!show || dismissed) return null;
+
+  return (
+    <div style={{
+      maxWidth:380, margin:"0 auto 16px",
+      background:"rgba(255,200,80,.95)", borderRadius:14,
+      padding:"10px 14px", fontSize:13, color:"#5a4500",
+      display:"flex", alignItems:"flex-start", gap:8,
+    }}>
+      <span style={{fontSize:18}}>⚠️</span>
+      <div style={{flex:1, lineHeight:1.4}}>
+        <b>Điện thoại chưa có giọng tiếng Việt!</b><br/>
+        Vào <b>Cài đặt → Hệ thống → Ngôn ngữ → Chuyển văn bản thành tiếng nói → Google TTS</b> rồi tải gói tiếng Việt.
+      </div>
+      <button onClick={() => { setDismissed(true); S.set("voiceWarnDismissed", true); }} style={{
+        background:"transparent", border:"none", fontSize:18, cursor:"pointer", color:"#5a4500",
+      }}>✕</button>
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════
 //  HOME SCREEN — với nút phụ huynh + chế độ học cùng bố mẹ
 // ══════════════════════════════════════════════════════════════
@@ -666,6 +715,9 @@ function HomeScreen({ onStart, kidName, ageGroup, onParent, onChangeAge, withPar
           {withParent ? "✅" : "⬜"} 👨‍👩 Học cùng bố mẹ
         </button>
       </div>
+
+      {/* Cảnh báo nếu thiếu giọng tiếng Việt */}
+      <VoiceCheck/>
 
       <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, maxWidth:420, margin:"0 auto"}}>
         {topics.map((t,i)=>(
@@ -743,7 +795,7 @@ function ParentGate({ onUnlock, onCancel }) {
             width:"100%", padding:"14px", fontSize:24, fontWeight:900,
             textAlign:"center", borderRadius:14,
             border: err ? "3px solid #dc3545" : "3px solid #eee",
-            fontFamily:"'Fredoka One',cursive", color:"#6C5CE7",
+            fontFamily:"inherit",fontWeight:900, color:"#6C5CE7",
             marginBottom:14, outline:"none",
           }}
         />
@@ -921,7 +973,7 @@ function ParentDashboard({ onClose, ageGroup, onChangeAge, kidName, setKidName }
               <div style={{display:"flex", gap:8}}>
                 <input value={newName} onChange={e=>setNewName(e.target.value.slice(0,15))} style={{
                   flex:1, padding:"10px 14px", borderRadius:10, border:"2px solid #eee",
-                  fontSize:15, fontFamily:"'Fredoka One',cursive", color:"#6C5CE7", outline:"none",
+                  fontSize:15, fontFamily:"inherit",fontWeight:900, color:"#6C5CE7", outline:"none",
                 }}/>
                 <button className="B" onClick={() => { S.set("kidName", newName); setKidName(newName); }} style={{
                   background:"#6C5CE7", color:"white", borderRadius:10, padding:"0 16px",
@@ -1077,7 +1129,7 @@ function ColoringGame({ topic, onDone, onHome }) {
           flex:2, background: touched>=20 ? "white" : "rgba(255,255,255,.4)",
           color: touched>=20 ? topic.color : "white",
           borderRadius:99, padding:"14px 0", fontSize:17,
-          fontFamily:"'Fredoka One',cursive",
+          fontFamily:"inherit",fontWeight:900,
         }}>{touched>=20 ? "Xong rồi! ✓" : "Tô thêm chút nhé..."}</button>
       </div>
     </div>
@@ -1105,7 +1157,7 @@ function TraceGame({ topic, target, onDone, onHome }) {
     const cv = canvasRef.current; const ctx = cv.getContext("2d");
     ctx.clearRect(0,0,cv.width,cv.height);
     // Vẽ chữ to mờ làm template
-    ctx.font = `bold ${Math.min(cv.width,cv.height)*0.7}px 'Fredoka One',cursive`;
+    ctx.font = `bold ${Math.min(cv.width,cv.height)*0.7}px sans-serif`;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillStyle = "#e0e0e0";
     ctx.fillText(char, cv.width/2, cv.height/2);
@@ -1157,7 +1209,7 @@ function TraceGame({ topic, target, onDone, onHome }) {
         <button className="B" onClick={finish} disabled={hit<30} style={{
           flex:2, background: hit>=30 ? "white" : "rgba(255,255,255,.4)",
           color: hit>=30 ? topic.color : "white",
-          borderRadius:99, padding:"14px 0", fontSize:17, fontFamily:"'Fredoka One',cursive",
+          borderRadius:99, padding:"14px 0", fontSize:17, fontFamily:"inherit",fontWeight:900,
         }}>{hit>=30 ? "Xong rồi! ✓" : "Tô thêm nhé..."}</button>
       </div>
     </div>
@@ -1262,6 +1314,25 @@ function LessonCard({ lesson, topic, onNext, num, total, onHome, withParent, big
         <div style={{textAlign:"center", marginBottom:14}}>
           <div className="F" style={{fontSize:30, color:"#222", lineHeight:1.15}}>{lesson.vi}</div>
           <div className="F" style={{fontSize:20, color:col, marginTop:4}}>{lesson.en}</div>
+
+          {/* Nút loa to để bé bấm nghe lại — luôn hiện, không phụ thuộc chế độ */}
+          {!withParent && (
+            <div style={{display:"flex", gap:10, justifyContent:"center", marginTop:12}}>
+              <button className="B" onClick={() => { buzz(10); sfx.tap(); speak(lesson.vi, "vi-VN", 0.75, 1.18, lesson.id); }}
+                style={{
+                  background: `linear-gradient(135deg, ${col}, ${col}CC)`,
+                  color:"white", borderRadius:99, padding:"10px 18px",
+                  fontSize:15, fontWeight:900, display:"flex", alignItems:"center", gap:6,
+                  boxShadow:`0 4px 14px ${col}55`,
+                }}>🔊 Tiếng Việt</button>
+              <button className="B" onClick={() => { buzz(10); sfx.tap(); speak(lesson.en, "en-US", 0.78); }}
+                style={{
+                  background:"white", color:col, borderRadius:99, padding:"10px 18px",
+                  fontSize:15, fontWeight:900, display:"flex", alignItems:"center", gap:6,
+                  border:`2.5px solid ${col}66`,
+                }}>🔊 English</button>
+            </div>
+          )}
         </div>
 
         {phase >= 1 ? (
@@ -1286,7 +1357,7 @@ function LessonCard({ lesson, topic, onNext, num, total, onHome, withParent, big
           style={{width:"100%",
             background: phase>=1 ? `linear-gradient(135deg,${col},${col}CC)` : "#f0f0f0",
             borderRadius:99, padding:"18px 0", color: phase>=1 ? "white" : "#bbb",
-            fontSize:21, fontFamily:"'Fredoka One',cursive",
+            fontSize:21, fontFamily:"inherit",fontWeight:900,
             boxShadow: phase>=1 ? `0 6px 24px ${col}66` : "none"}}>
           {phase>=1 ? (num<total ? "Bài tiếp theo ▶" : "🎉 Xong rồi!") : "Nghe câu vần 🎵"}
         </button>
@@ -1498,7 +1569,7 @@ function WinScreen({ topic, score, total, kidName, onHome, onRetry }) {
       <div style={{display:"flex", flexDirection:"column", gap:12, width:"100%", maxWidth:320}}>
         <button className="B" onClick={() => { buzz(20); sfx.tap(); onRetry(); }} style={{
           background:"white", borderRadius:99, padding:"18px 0",
-          fontSize:20, fontFamily:"'Fredoka One',cursive",
+          fontSize:20, fontFamily:"inherit",fontWeight:900,
           color:topic.color, boxShadow:"0 6px 24px rgba(0,0,0,.2)"}}>
           🔄 Học tiếp!
         </button>
@@ -1529,7 +1600,7 @@ function NamePrompt({ onDone }) {
       </p>
       <input type="text" value={name} onChange={e => setName(e.target.value.slice(0,15))}
         placeholder="Tên bé..." style={{width:"100%", maxWidth:300, padding:"14px 18px",
-          fontSize:20, fontFamily:"'Fredoka One',cursive",
+          fontSize:20, fontFamily:"inherit",fontWeight:900,
           borderRadius:99, border:"3px solid rgba(255,255,255,.4)",
           background:"rgba(255,255,255,.95)", color:"#6C5CE7",
           textAlign:"center", outline:"none", marginBottom:16}}/>
@@ -1537,7 +1608,7 @@ function NamePrompt({ onDone }) {
         disabled={!name.trim()} style={{
           background: name.trim() ? "white" : "rgba(255,255,255,.4)",
           borderRadius:99, padding:"14px 36px",
-          fontSize:18, fontFamily:"'Fredoka One',cursive",
+          fontSize:18, fontFamily:"inherit",fontWeight:900,
           color:"#6C5CE7", boxShadow:"0 6px 24px rgba(0,0,0,.2)",
         }}>Bắt đầu nào! ▶</button>
       <button className="B" onClick={() => { S.set("kidName", "bé"); onDone("bé"); }}
